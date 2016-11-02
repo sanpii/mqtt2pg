@@ -4,7 +4,7 @@ extern crate postgres;
 extern crate rustc_serialize;
 
 use mqttc::PubSub;
-use mqttc::ClientOptions;
+use mqttc::{Client, ClientOptions};
 use netopt::NetworkOptions;
 use postgres::{Connection, TlsMode};
 use rustc_serialize::json::{self, Json};
@@ -31,21 +31,16 @@ fn main() {
         Err(err) => panic!("Unable to load configuration: {}", err),
     };
 
-    let netopt = NetworkOptions::new();
+    let mut mqtt = match get_mqtt_connection(&config.mqtt) {
+        Ok(mqtt) => mqtt,
+        Err(err) => panic!("Unable to connect to mqtt server: {}", err),
+    };
 
-    let mut client = ClientOptions::new();
-    client.set_username(config.mqtt.username)
-        .set_password(config.mqtt.password);
-
-    let dsn = format!("{}:{}", config.mqtt.server, config.mqtt.port);
-    let mut connection = client.connect(dsn.as_str(), netopt)
-        .expect("Can't connect to server");
-
-    connection.subscribe("#")
+    mqtt.subscribe("#")
         .unwrap();
 
     loop {
-        let message = match connection.await().unwrap() {
+        let message = match mqtt.await().unwrap() {
             Some(message) => message,
             None => continue,
         };
@@ -73,22 +68,23 @@ fn main() {
             },
         };
 
-        let schema = match topic.as_str() {
-            "domotic/radiator" => "room_id int, radiator_id integer, powered boolean",
-            "domotic/temperature" => "room_id int, temperature numeric",
-            "domotic/humidity" => "room_id int, humidity numeric",
-            "domotic/teleinfo" => "adco text, optarif text, isousc smallint, hchc bigint, hchp bigint, ptec text, iinst int, imax int, papp int, hhphc text, motdetat text",
-            "domotic/vmc" => "speed integer, forced boolean",
-            "domotic/weather" => "temperature_indoor numeric, temperature_outdoor numeric, dewpoint numeric, humidity_indoor integer, humidity_outdoor integer, wind_speed numeric, wind_dir numeric, wind_direction text, wind_chill numeric, rain_1h numeric, rain_24h numeric, rain_total numeric, pressure numeric, tendency text, forecast text",
-            "network/connected_device" => "station_mac macaddr, ip inet, mac macaddr, virtual_mac macaddr",
-            "system/log" => "level text, priority numeric, facility text, date timestamp, host text, message text, pid text, program text",
-            _ => {
+        let schema = match get_schema(topic.clone()) {
+            Some(schema) => schema,
+            None => {
                 println!("Unknow topic: '{}'.", topic);
                 continue;
             },
         };
 
-        save(&config.postgresql, database.to_string(), table.to_string(), schema.to_string(), json);
+        let pgsql = match get_pgsql_connection(&config.postgresql, database) {
+            Ok(pgsql) => pgsql,
+            Err(e) => {
+                println!("Connection error: {:?}", e);
+                return;
+            },
+        };
+
+        save(pgsql, table, schema, json);
     }
 }
 
@@ -112,17 +108,51 @@ fn get_config() -> Result<Config, String>
     }
 }
 
-fn save(config: &ServerConfig, database: String, table: String, schema: String, json: Json)
+fn get_mqtt_connection(config: &ServerConfig) -> Result<Client, String>
+{
+    let netopt = NetworkOptions::new();
+
+    let mut client = ClientOptions::new();
+    client.set_username(config.username.clone())
+        .set_password(config.password.clone());
+
+    let dsn = format!("{}:{}", config.server, config.port);
+
+    match client.connect(dsn.as_str(), netopt) {
+        Ok(connection) => Ok(connection),
+        Err(err) => Err(format!("{:?}", err)),
+    }
+}
+
+fn get_pgsql_connection<T>(config: &ServerConfig, database: T) -> Result<Connection, String> where T: std::fmt::Display
 {
     let dsn = format!("postgres://{}:{}@{}:{}/{}", config.username, config.password, config.server, config.port, database);
-    let connection = match Connection::connect(dsn.as_str(), TlsMode::None) {
-        Ok(connection) => connection,
-        Err(e) => {
-            println!("Connection error: {:?}", e);
-            return;
-        },
+
+    match Connection::connect(dsn.as_str(), TlsMode::None) {
+        Ok(connection) => Ok(connection),
+        Err(err) => Err(format!("{:?}", err)),
+    }
+}
+
+fn get_schema(topic: String) -> Option<String>
+{
+    let schema = match topic.as_str() {
+        "domotic/radiator" => "room_id int, radiator_id integer, powered boolean",
+        "domotic/temperature" => "room_id int, temperature numeric",
+        "domotic/humidity" => "room_id int, humidity numeric",
+        "domotic/teleinfo" => "adco text, optarif text, isousc smallint, hchc bigint, hchp bigint, ptec text, iinst int, imax int, papp int, hhphc text, motdetat text",
+        "domotic/vmc" => "speed integer, forced boolean",
+        "domotic/weather" => "temperature_indoor numeric, temperature_outdoor numeric, dewpoint numeric, humidity_indoor integer, humidity_outdoor integer, wind_speed numeric, wind_dir numeric, wind_direction text, wind_chill numeric, rain_1h numeric, rain_24h numeric, rain_total numeric, pressure numeric, tendency text, forecast text",
+        "network/connected_device" => "station_mac macaddr, ip inet, mac macaddr, virtual_mac macaddr",
+        "system/log" => "level text, priority numeric, facility text, date timestamp, host text, message text, pid text, program text",
+        _ => return None,
     };
 
+    Some(String::from(schema))
+}
+
+fn save<T, U>(connection: Connection, table: T, schema: U, json: Json) where T: std::fmt::Display, U: std::fmt::Display
+{
     let sql = format!("INSERT INTO {} SELECT now() AS created, * FROM json_to_record($1) as x({})", table, schema);
 
     match connection.execute(sql.as_str(), &[&json]) {
