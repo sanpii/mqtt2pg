@@ -10,5 +10,8 @@
         "password": "",
         "server": "",
         "port": 4321
+    },
+    "schema": {
+        "topic/subtopic": "field1, field2"
     }
 }

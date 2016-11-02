@@ -8,6 +8,7 @@ use mqttc::{Client, ClientOptions};
 use netopt::NetworkOptions;
 use postgres::{Connection, TlsMode};
 use rustc_serialize::json::{self, Json};
+use std::collections::HashMap;
 use std::io::prelude::*;
 use std::fs::File;
 
@@ -22,7 +23,8 @@ pub struct ServerConfig {
 #[derive(RustcDecodable)]
 pub struct Config  {
     mqtt: ServerConfig,
-    postgresql: ServerConfig
+    postgresql: ServerConfig,
+    schema: HashMap<String, String>,
 }
 
 fn main() {
@@ -68,7 +70,7 @@ fn main() {
             },
         };
 
-        let schema = match get_schema(topic.clone()) {
+        let schema = match config.schema.get(&topic) {
             Some(schema) => schema,
             None => {
                 println!("Unknow topic: '{}'.", topic);
@@ -132,23 +134,6 @@ fn get_pgsql_connection<T>(config: &ServerConfig, database: T) -> Result<Connect
         Ok(connection) => Ok(connection),
         Err(err) => Err(format!("{:?}", err)),
     }
-}
-
-fn get_schema(topic: String) -> Option<String>
-{
-    let schema = match topic.as_str() {
-        "domotic/radiator" => "room_id int, radiator_id integer, powered boolean",
-        "domotic/temperature" => "room_id int, temperature numeric",
-        "domotic/humidity" => "room_id int, humidity numeric",
-        "domotic/teleinfo" => "adco text, optarif text, isousc smallint, hchc bigint, hchp bigint, ptec text, iinst int, imax int, papp int, hhphc text, motdetat text",
-        "domotic/vmc" => "speed integer, forced boolean",
-        "domotic/weather" => "temperature_indoor numeric, temperature_outdoor numeric, dewpoint numeric, humidity_indoor integer, humidity_outdoor integer, wind_speed numeric, wind_dir numeric, wind_direction text, wind_chill numeric, rain_1h numeric, rain_24h numeric, rain_total numeric, pressure numeric, tendency text, forecast text",
-        "network/connected_device" => "station_mac macaddr, ip inet, mac macaddr, virtual_mac macaddr",
-        "system/log" => "level text, priority numeric, facility text, date timestamp, host text, message text, pid text, program text",
-        _ => return None,
-    };
-
-    Some(String::from(schema))
 }
 
 fn save<T, U>(connection: Connection, table: T, schema: U, json: Json) where T: std::fmt::Display, U: std::fmt::Display
