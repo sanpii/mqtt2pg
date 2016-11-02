@@ -1,0 +1,13 @@
+[package]
+name = "mqtt2pg"
+version = "0.1.0"
+authors = ["Sanpi <sanpi@homecomputing.fr>"]
+
+[dependencies]
+netopt = "0.1"
+mqttc = "0.1"
+rustc-serialize = "0.3"
+
+[dependencies.postgres]
+version = "0.12"
+features = ["with-rustc-serialize"]
