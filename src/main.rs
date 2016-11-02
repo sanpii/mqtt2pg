@@ -7,14 +7,38 @@ use mqttc::PubSub;
 use mqttc::ClientOptions;
 use netopt::NetworkOptions;
 use postgres::{Connection, TlsMode};
-use rustc_serialize::json::Json;
+use rustc_serialize::json::{self, Json};
+use std::io::prelude::*;
+use std::fs::File;
+
+#[derive(RustcDecodable)]
+pub struct ServerConfig {
+    username: String,
+    password: String,
+    server: String,
+    port: u16,
+}
+
+#[derive(RustcDecodable)]
+pub struct Config  {
+    mqtt: ServerConfig,
+    postgresql: ServerConfig
+}
 
 fn main() {
+    let config = match get_config() {
+        Ok(config) => config,
+        Err(err) => panic!("Unable to load configuration: {}", err),
+    };
+
     let netopt = NetworkOptions::new();
 
     let mut client = ClientOptions::new();
+    client.set_username(config.mqtt.username)
+        .set_password(config.mqtt.password);
 
-    let mut connection = client.connect("127.0.0.1:1883", netopt)
+    let dsn = format!("{}:{}", config.mqtt.server, config.mqtt.port);
+    let mut connection = client.connect(dsn.as_str(), netopt)
         .expect("Can't connect to server");
 
     connection.subscribe("#")
@@ -64,13 +88,33 @@ fn main() {
             },
         };
 
-        save(database.to_string(), table.to_string(), schema.to_string(), json);
+        save(&config.postgresql, database.to_string(), table.to_string(), schema.to_string(), json);
     }
 }
 
-fn save(database: String, table: String, schema: String, json: Json)
+fn get_config() -> Result<Config, String>
 {
-    let dsn = format!("postgres://postgres@localhost/{}", database);
+    let mut file = match File::open("config.json") {
+        Ok(file) => file,
+        Err(err) => return Err(format!("{}", err)),
+    };
+
+    let mut json = String::new();
+
+    match file.read_to_string(&mut json) {
+        Ok(_) => (),
+        Err(err) => return Err(format!("{}", err)),
+    };
+
+    match json::decode(&json) {
+        Ok(json) => Ok(json),
+        Err(err) => return Err(format!("{}", err)),
+    }
+}
+
+fn save(config: &ServerConfig, database: String, table: String, schema: String, json: Json)
+{
+    let dsn = format!("postgres://{}:{}@{}:{}/{}", config.username, config.password, config.server, config.port, database);
     let connection = match Connection::connect(dsn.as_str(), TlsMode::None) {
         Ok(connection) => connection,
         Err(e) => {

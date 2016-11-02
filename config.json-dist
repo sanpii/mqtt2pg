@@ -1,0 +1,14 @@
+{
+    "mqtt": {
+        "username": "",
+        "password": "",
+        "server": "",
+        "port": 1883
+    },
+    "postgresql": {
+        "username": "",
+        "password": "",
+        "server": "",
+        "port": 4321
+    }
+}
