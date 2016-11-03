@@ -32,6 +32,8 @@ pub struct Config  {
 const APP_INFO: AppInfo = AppInfo { name: "mqtt2pg", author: "Sanpi" };
 
 fn main() {
+    let mut connections: HashMap<String, Connection> = HashMap::new();
+
     let config = match get_config() {
         Ok(config) => config,
         Err(err) => panic!("Unable to load configuration: {}", err),
@@ -82,7 +84,7 @@ fn main() {
             },
         };
 
-        let pgsql = match get_pgsql_connection(&config.postgresql, database) {
+        let pgsql = match get_pgsql_connection(&mut connections, &config.postgresql, String::from(database)) {
             Ok(pgsql) => pgsql,
             Err(e) => {
                 println!("Connection error: {:?}", e);
@@ -90,7 +92,7 @@ fn main() {
             },
         };
 
-        save(pgsql, table, schema, json);
+        save(&pgsql, table, schema, json);
     }
 }
 
@@ -136,17 +138,22 @@ fn get_mqtt_connection(config: &ServerConfig) -> Result<Client, String>
     }
 }
 
-fn get_pgsql_connection<T>(config: &ServerConfig, database: T) -> Result<Connection, String> where T: std::fmt::Display
+fn get_pgsql_connection<'a>(connections: &'a mut HashMap<String, Connection>, config: &ServerConfig, database: String) -> Result<&'a Connection, String>
 {
     let dsn = format!("postgres://{}:{}@{}:{}/{}", config.username, config.password, config.server, config.port, database);
 
-    match Connection::connect(dsn.as_str(), TlsMode::None) {
-        Ok(connection) => Ok(connection),
-        Err(err) => Err(format!("{:?}", err)),
+    if !connections.contains_key(&database) {
+        let connection = match Connection::connect(dsn.as_str(), TlsMode::None) {
+            Ok(connection) => connection,
+            Err(err) => return Err(format!("{:?}", err)),
+        };
+        connections.insert(database.clone(), connection);
     }
+
+    Ok(connections.get(&database).unwrap())
 }
 
-fn save<T, U>(connection: Connection, table: T, schema: U, json: Json) where T: std::fmt::Display, U: std::fmt::Display
+fn save<T, U>(connection: &Connection, table: T, schema: U, json: Json) where T: std::fmt::Display, U: std::fmt::Display
 {
     let sql = format!("INSERT INTO {} SELECT now() AS created, * FROM json_to_record($1) as x({})", table, schema);
 
