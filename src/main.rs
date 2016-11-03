@@ -1,8 +1,10 @@
+extern crate app_dirs;
 extern crate mqttc;
 extern crate netopt;
 extern crate postgres;
 extern crate rustc_serialize;
 
+use app_dirs::{AppInfo, AppDataType};
 use mqttc::PubSub;
 use mqttc::{Client, ClientOptions};
 use netopt::NetworkOptions;
@@ -26,6 +28,8 @@ pub struct Config  {
     postgresql: ServerConfig,
     schema: HashMap<String, String>,
 }
+
+const APP_INFO: AppInfo = AppInfo { name: "mqtt2pg", author: "Sanpi" };
 
 fn main() {
     let config = match get_config() {
@@ -92,7 +96,13 @@ fn main() {
 
 fn get_config() -> Result<Config, String>
 {
-    let mut file = match File::open("config.json") {
+    let mut config = match app_dirs::get_app_root(AppDataType::UserConfig, &APP_INFO) {
+        Ok(config_dir) => config_dir,
+        Err(err) => return Err(format!("{}", err)),
+    };
+    config.push("config.json");
+
+    let mut file = match File::open(config) {
         Ok(file) => file,
         Err(err) => return Err(format!("{}", err)),
     };
