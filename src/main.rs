@@ -155,7 +155,10 @@ fn listen(mqtt: &mut Client, pgsql: Connection, config: &Config, topic: String)
 
         let schema = match config.schema.get(&topic) {
             Some(schema) => schema,
-            None => panic!("Unknow topic: '{}'.", topic),
+            None => {
+                println!("Unknow topic: '{}'.", topic);
+                continue;
+            },
         };
 
         let json = match Json::from_str(payload.as_str()) {
