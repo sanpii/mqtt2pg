@@ -161,7 +161,7 @@ fn listen(mqtt: &mut Client, pgsql: Connection, config: &Config, topic: String)
         let json = match Json::from_str(payload.as_str()) {
             Ok(json) => json,
             Err(err) => {
-                println!("Invalid json payload: {}", err);
+                println!("Invalid json payload: {} [{}]", err, payload);
                 continue;
             },
         };
